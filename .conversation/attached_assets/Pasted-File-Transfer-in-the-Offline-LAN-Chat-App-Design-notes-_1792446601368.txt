@@ -1,0 +1,30 @@
+File Transfer in the Offline LAN Chat App
+Design notes for sending files directly inside the chat, with no internet and no server, between phones on the same local network.
+Why it matters
+File transfer is where a local network beats any internet messenger: Wi-Fi gives speeds of tens of MB/s with no data cost, and everything stays between the two devices.
+How file transfer works in the chat
+1. Message vs. payload: the chat message only carries a small file card (name, size, type, hash, thumbnail). The actual bytes travel on a separate channel, so the chat never freezes while a big file is moving.
+2. Direct transfer: sender and receiver open a TCP connection and the file streams straight between the two phones, with no server.
+3. Chunking: the file is split into chunks (for example 256 KB), each encrypted and numbered.
+4. Resume: if the connection drops or the phone sleeps, the transfer continues from the last confirmed chunk instead of restarting.
+5. Integrity: a SHA-256 hash of the whole file is checked at the end, so a corrupted or tampered file is rejected.
+6. Encryption: the same end-to-end encryption as messages, so nobody sniffing the Wi-Fi can read the file.
+Features worth having
+• Progress bar, speed, and cancel for each transfer.
+• Accept or decline for large files, so nobody can push 2 GB onto your phone.
+• Send to a group: the file is sent to each member, or members re-share it among themselves, which spares the sender's bandwidth.
+• Previews: image thumbnails, a PDF first page, and a voice-note waveform.
+• Multiple files at once, including whole folders.
+• Safety checks: file size limits, a warning for risky types (.apk, .exe, scripts), and never auto-opening a received file.
+Flutter packages to start with
+• dart:io sockets (ServerSocket and Socket) for streaming
+• file_picker to choose files
+• crypto for hashing, plus cryptography or sodium for encryption
+• path_provider to store received files
+Updated MVP order
+1. Discovery plus text messaging
+2. Local history
+3. Single file transfer with progress
+4. End-to-end encryption
+5. Resume, groups, and previews
+6. Relay/mesh and fingerprint verification

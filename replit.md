@@ -1,6 +1,6 @@
-# [Project name]
+# Offline LAN Chat
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+LocalLink is a Flutter app for discovering nearby phones and chatting directly over the same local Wi-Fi network, without an internet chat service.
 
 ## Run & Operate
 
@@ -10,6 +10,7 @@ _Replace the heading above with the project's name, and this line with one sente
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL` — Postgres connection string
+- Flutter app source: `mobile/offline_lan_chat`; follow its README to create Android/iOS runner folders with a Flutter SDK.
 
 ## Stack
 
@@ -22,23 +23,29 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `mobile/offline_lan_chat/lib/` — Flutter UI, local history, and direct LAN discovery/messaging.
+- `mobile/offline_lan_chat/README.md` — platform permissions and setup instructions.
+- `artifacts/api-server/` — shared API service; the LAN chat MVP does not depend on it.
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- The chat MVP is implemented in Flutter source as requested; do not silently replace it with Expo.
+- Device discovery and message delivery use local UDP broadcast and direct TCP sockets; the MVP does not route chat through the shared API.
+- Message history is local SQLite. Current messages are not encrypted; only use trusted Wi-Fi until encryption is added.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Discover phones on the same Wi-Fi, send acknowledged text messages, rename the local device, and browse locally saved conversation history.
+- Planned later work from the design notes: direct file transfers, encryption, resume, groups, and previews.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- Keep this app in Flutter; the user chose Flutter source files over switching to Expo.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- The current workspace has Dart tooling but no Flutter SDK or Flutter app preview. Generate native runner folders and run on two physical phones using the instructions in the Flutter project's README.
+- IPv4 broadcast can be blocked by Wi-Fi client isolation, VPNs, or non-broadcast LAN configurations.
 
 ## Pointers
 

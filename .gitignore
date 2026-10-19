@@ -47,3 +47,12 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Flutter source project output
+mobile/offline_lan_chat/.dart_tool/
+mobile/offline_lan_chat/.flutter-plugins
+mobile/offline_lan_chat/.flutter-plugins-dependencies
+mobile/offline_lan_chat/.packages
+mobile/offline_lan_chat/build/
+mobile/offline_lan_chat/android/local.properties
+mobile/offline_lan_chat/ios/Flutter/Generated.xcconfig

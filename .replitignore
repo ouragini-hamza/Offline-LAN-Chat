@@ -3,3 +3,7 @@
 
 # No need to store the pnpm store twice.
 .local
+
+# Flutter build and package caches
+mobile/offline_lan_chat/.dart_tool
+mobile/offline_lan_chat/build

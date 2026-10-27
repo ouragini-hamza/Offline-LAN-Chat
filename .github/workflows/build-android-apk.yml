@@ -1,0 +1,116 @@
+name: Flutter Android APK
+
+on:
+  push:
+    branches:
+      - main
+      - fix/chat-reliability-security-review
+    paths:
+      - "mobile/offline_lan_chat/**"
+      - ".github/workflows/build-android-apk.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "mobile/offline_lan_chat/**"
+      - ".github/workflows/build-android-apk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze-and-test:
+    name: Analyze and test Flutter source
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile/offline_lan_chat
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+          cache-dependency-path: mobile/offline_lan_chat/pubspec.yaml
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
+
+  build-apk:
+    name: Build installable Android APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile/offline_lan_chat
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+          cache-dependency-path: mobile/offline_lan_chat/pubspec.yaml
+
+      - name: Generate Android platform project
+        run: |
+          flutter create --empty --platforms=android --project-name offline_lan_chat --org app.locallink "$RUNNER_TEMP/offline_lan_chat_runner"
+          cp -R "$RUNNER_TEMP/offline_lan_chat_runner/android" ./android
+
+      - name: Add local-network permissions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          content = manifest.read_text()
+          permissions = [
+              "android.permission.INTERNET",
+              "android.permission.ACCESS_NETWORK_STATE",
+              "android.permission.ACCESS_WIFI_STATE",
+              "android.permission.CHANGE_WIFI_MULTICAST_STATE",
+          ]
+          missing = [
+              f'    <uses-permission android:name="{permission}" />'
+              for permission in permissions
+              if f'android:name="{permission}"' not in content
+          ]
+          if missing:
+              marker = "<application"
+              if marker not in content:
+                  raise SystemExit("Could not find <application> in generated AndroidManifest.xml")
+              content = content.replace(marker, "\n".join(missing) + "\n    " + marker, 1)
+              manifest.write_text(content)
+          print(f"Android permissions checked: {len(permissions)}")
+          PY
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-lan-chat-apk
+          path: mobile/offline_lan_chat/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14

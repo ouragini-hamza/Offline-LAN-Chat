@@ -83,6 +83,15 @@ class LanDiscoveryService {
   }) async {
     final identity = _identity;
     if (identity == null) throw StateError('Discovery is not running.');
+    if (!_isValidDeviceId(peer.id) ||
+        !_isValidDeviceId(messageId) ||
+        peer.port < 1 ||
+        peer.port > 65535 ||
+        InternetAddress.tryParse(peer.address) == null ||
+        body.trim().isEmpty ||
+        body.length > 4000) {
+      throw ArgumentError('Invalid peer or message data.');
+    }
 
     final socket = await Socket.connect(
       InternetAddress(peer.address),
@@ -93,6 +102,7 @@ class LanDiscoveryService {
 
     final acknowledgement = Completer<void>();
     final subscription = socket
+        .cast<List<int>>()
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen(
@@ -147,8 +157,12 @@ class LanDiscoveryService {
         final port = packet['tcp_port'];
         if (packet['kind'] != 'announce' ||
             id is! String ||
+            !_isValidDeviceId(id) ||
             name is! String ||
+            !_isValidDisplayName(name) ||
             port is! int ||
+            port < 1 ||
+            port > 65535 ||
             id == _identity?.id) {
           continue;
         }
@@ -170,6 +184,7 @@ class LanDiscoveryService {
   void _handleConnection(Socket socket) {
     socket.setOption(SocketOption.tcpNoDelay, true);
     socket
+        .cast<List<int>>()
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen(
@@ -183,28 +198,47 @@ class LanDiscoveryService {
   Future<void> _handleMessageLine(Socket socket, String line) async {
     try {
       if (line.length > 16 * 1024) return;
-      final packet = jsonDecode(line) as Map<String, dynamic>;
+      final decoded = jsonDecode(line);
+      if (decoded is! Map<String, dynamic>) return;
+
       final identity = _identity;
+      final messageId = decoded['id'];
+      final senderId = decoded['from_id'];
+      final senderName = decoded['from_name'];
+      final body = decoded['body'];
+      final createdAtMicros = decoded['created_at'];
       if (identity == null ||
-          packet['kind'] != 'text' ||
-          packet['to_id'] != identity.id ||
-          packet['id'] is! String ||
-          packet['from_id'] is! String ||
-          packet['from_name'] is! String ||
-          packet['body'] is! String ||
-          (packet['body'] as String).length > 4000 ||
-          packet['created_at'] is! int) {
+          decoded['kind'] != 'text' ||
+          decoded['to_id'] != identity.id ||
+          messageId is! String ||
+          !_isValidDeviceId(messageId) ||
+          senderId is! String ||
+          !_isValidDeviceId(senderId) ||
+          senderName is! String ||
+          !_isValidDisplayName(senderName) ||
+          body is! String ||
+          body.trim().isEmpty ||
+          body.length > 4000 ||
+          createdAtMicros is! int) {
+        return;
+      }
+
+      // Check the claimed sender against a recently discovered LAN peer.
+      // This is a consistency check, not cryptographic authentication.
+      final knownPeer = _peers[senderId];
+      if (knownPeer == null ||
+          knownPeer.address != socket.remoteAddress.address ||
+          knownPeer.name != senderName ||
+          DateTime.now().difference(knownPeer.lastSeen) > _peerExpiry) {
         return;
       }
 
       final incoming = IncomingText(
-        id: packet['id'] as String,
-        peerId: packet['from_id'] as String,
-        peerName: packet['from_name'] as String,
-        body: packet['body'] as String,
-        createdAt: DateTime.fromMicrosecondsSinceEpoch(
-          packet['created_at'] as int,
-        ),
+        id: messageId,
+        peerId: senderId,
+        peerName: senderName,
+        body: body,
+        createdAt: DateTime.fromMicrosecondsSinceEpoch(createdAtMicros),
       );
       await _onIncomingText?.call(incoming);
       socket.write('${jsonEncode({'kind': 'ack', 'id': incoming.id})}\n');
@@ -213,6 +247,14 @@ class LanDiscoveryService {
       // Ignore invalid packets without closing the discovery service.
     }
   }
+
+  bool _isValidDeviceId(String value) =>
+      RegExp(r'^[a-f0-9]{32}$').hasMatch(value);
+
+  bool _isValidDisplayName(String value) =>
+      value.trim().isNotEmpty &&
+      value.length <= 32 &&
+      !RegExp(r'[\x00-\x1F\x7F]').hasMatch(value);
 
   Future<void> _announce() async {
     final identity = _identity;

@@ -4,6 +4,7 @@ import 'dart:io';
 
 import '../models/nearby_peer.dart';
 import 'identity_store.dart';
+import 'message_crypto.dart';
 
 class IncomingText {
   const IncomingText({
@@ -31,6 +32,8 @@ class LanDiscoveryService {
       StreamController<List<NearbyPeer>>.broadcast();
   DeviceIdentity? _identity;
   Future<void> Function(IncomingText message)? _onIncomingText;
+  final IdentityStore _identityStore = IdentityStore();
+  final MessageCrypto _crypto = MessageCrypto();
   ServerSocket? _server;
   RawDatagramSocket? _discoverySocket;
   Timer? _announceTimer;
@@ -80,9 +83,23 @@ class LanDiscoveryService {
     required String messageId,
     required String body,
     required DateTime createdAt,
+    required String recipientPublicKey,
   }) async {
     final identity = _identity;
     if (identity == null) throw StateError('Discovery is not running.');
+
+    final trusted = await _identityStore.trustedPeer(peer.id);
+    if (trusted == null || trusted.publicKey != recipientPublicKey) {
+      throw StateError('Pair with this device by scanning its QR code first.');
+    }
+    final encrypted = await _crypto.encrypt(
+      local: identity,
+      recipientPublicKey: trusted.publicKey,
+      messageId: messageId,
+      plaintext: body,
+      createdAt: createdAt.microsecondsSinceEpoch,
+      identityStore: _identityStore,
+    );
 
     final socket = await Socket.connect(
       InternetAddress(peer.address),
@@ -122,7 +139,7 @@ class LanDiscoveryService {
 
     try {
       socket.write(
-        '${jsonEncode({'kind': 'text', 'id': messageId, 'from_id': identity.id, 'from_name': identity.name, 'to_id': peer.id, 'body': body, 'created_at': createdAt.microsecondsSinceEpoch})}\n',
+        '${jsonEncode({'kind': 'text', 'id': messageId, 'from_id': identity.id, 'from_name': identity.name, 'to_id': peer.id, 'sender_public_key': identity.publicKey, 'nonce': encrypted['nonce'], 'ciphertext': encrypted['ciphertext'], 'mac': encrypted['mac'], 'created_at': createdAt.microsecondsSinceEpoch})}\n',
       );
       await socket.flush();
       await acknowledgement.future.timeout(const Duration(seconds: 8));
@@ -145,10 +162,13 @@ class LanDiscoveryService {
         final id = packet['id'];
         final name = packet['name'];
         final port = packet['tcp_port'];
+        final publicKey = packet['public_key'];
         if (packet['kind'] != 'announce' ||
             id is! String ||
             name is! String ||
             port is! int ||
+            publicKey is! String ||
+            publicKey.isEmpty ||
             id == _identity?.id) {
           continue;
         }
@@ -159,6 +179,7 @@ class LanDiscoveryService {
           address: datagram.address.address,
           port: port,
           lastSeen: DateTime.now(),
+          publicKey: publicKey,
         );
         _emitPeers();
       } catch (_) {
@@ -191,20 +212,38 @@ class LanDiscoveryService {
           packet['id'] is! String ||
           packet['from_id'] is! String ||
           packet['from_name'] is! String ||
-          packet['body'] is! String ||
-          (packet['body'] as String).length > 4000 ||
+          packet['sender_public_key'] is! String ||
+          packet['nonce'] is! String ||
+          packet['ciphertext'] is! String ||
+          packet['mac'] is! String ||
           packet['created_at'] is! int) {
         return;
       }
 
+      final senderId = packet['from_id'] as String;
+      final trusted = await _identityStore.trustedPeer(senderId);
+      final senderPublicKey = packet['sender_public_key'] as String;
+      if (trusted == null || trusted.publicKey != senderPublicKey) return;
+      final messageId = packet['id'] as String;
+      final createdAt = packet['created_at'] as int;
+      final body = await _crypto.decrypt(
+        local: identity,
+        senderPublicKey: senderPublicKey,
+        senderId: senderId,
+        messageId: messageId,
+        nonce: packet['nonce'] as String,
+        ciphertext: packet['ciphertext'] as String,
+        mac: packet['mac'] as String,
+        createdAt: createdAt,
+        identityStore: _identityStore,
+      );
+      if (body.length > 4000) return;
       final incoming = IncomingText(
-        id: packet['id'] as String,
-        peerId: packet['from_id'] as String,
-        peerName: packet['from_name'] as String,
-        body: packet['body'] as String,
-        createdAt: DateTime.fromMicrosecondsSinceEpoch(
-          packet['created_at'] as int,
-        ),
+        id: messageId,
+        peerId: senderId,
+        peerName: trusted.name,
+        body: body,
+        createdAt: DateTime.fromMicrosecondsSinceEpoch(createdAt),
       );
       await _onIncomingText?.call(incoming);
       socket.write('${jsonEncode({'kind': 'ack', 'id': incoming.id})}\n');
@@ -226,6 +265,7 @@ class LanDiscoveryService {
         'id': identity.id,
         'name': identity.name,
         'tcp_port': server.port,
+        'public_key': identity.publicKey,
       }),
     );
     socket.send(packet, InternetAddress('255.255.255.255'), _discoveryPort);

@@ -18,16 +18,52 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
+
+      - name: Generate Android runner files
+        run: flutter create --empty --platforms=android --project-name offline_lan_chat --org app.locallink .
+
+      - name: Add Android network and camera permissions
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path("android/app/src/main/AndroidManifest.xml")
+          text = path.read_text()
+          permissions = [
+              "android.permission.INTERNET",
+              "android.permission.ACCESS_NETWORK_STATE",
+              "android.permission.CHANGE_WIFI_MULTICAST_STATE",
+              "android.permission.CAMERA",
+          ]
+          additions = "".join(
+              f'    <uses-permission android:name="{permission}" />\\n'
+              for permission in permissions
+              if f'android:name="{permission}"' not in text
+          )
+          if additions:
+              text = text.replace("<manifest", "<manifest", 1)
+              marker = "    <application"
+              if marker not in text:
+                  raise SystemExit("Could not find <application> in AndroidManifest.xml")
+              text = text.replace(marker, additions + marker, 1)
+              path.write_text(text)
+
       - name: Show Flutter version
         run: flutter --version
+
       - name: Resolve dependencies
         run: flutter pub get
+
       - name: Analyze Dart and Flutter code
         run: flutter analyze
+
       - name: Run tests
         run: flutter test
+
+      - name: Build Android debug APK
+        run: flutter build apk --debug

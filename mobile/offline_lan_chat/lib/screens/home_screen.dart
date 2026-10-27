@@ -4,6 +4,7 @@ import '../models/chat_message.dart';
 import '../models/nearby_peer.dart';
 import '../services/chat_controller.dart';
 import 'chat_screen.dart';
+import 'identity_qr_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({required this.controller, super.key});
@@ -21,6 +22,11 @@ class HomeScreen extends StatelessWidget {
           style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -0.5),
         ),
         actions: [
+          IconButton(
+            tooltip: 'Secure pairing with QR',
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => IdentityQrScreen(controller: controller))),
+            icon: const Icon(Icons.qr_code_2_rounded),
+          ),
           IconButton(
             tooltip: 'Change device name',
             onPressed: () => _editDeviceName(context),
@@ -267,9 +273,12 @@ class _PeerTile extends StatelessWidget {
           peer.name,
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
-        subtitle: const Text(
-          'Available to chat',
-          style: TextStyle(color: Color(0xFF718078), fontSize: 13),
+        subtitle: FutureBuilder<bool>(
+          future: null,
+          builder: (context, snapshot) => const Text(
+            'Pair with QR before sending encrypted messages',
+            style: TextStyle(color: Color(0xFF718078), fontSize: 12),
+          ),
         ),
         trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 15),
         onTap: onTap,

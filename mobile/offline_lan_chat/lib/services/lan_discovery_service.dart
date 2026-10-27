@@ -84,11 +84,12 @@ class LanDiscoveryService {
     final identity = _identity;
     if (identity == null) throw StateError('Discovery is not running.');
     if (!_isValidDeviceId(peer.id) ||
+        !_isValidDeviceId(messageId) ||
         peer.port < 1 ||
         peer.port > 65535 ||
+        InternetAddress.tryParse(peer.address) == null ||
         body.trim().isEmpty ||
-        body.length > 4000 ||
-        !_isValidDeviceId(messageId)) {
+        body.length > 4000) {
       throw ArgumentError('Invalid peer or message data.');
     }
 
@@ -195,17 +196,18 @@ class LanDiscoveryService {
   Future<void> _handleMessageLine(Socket socket, String line) async {
     try {
       if (line.length > 16 * 1024) return;
-      final packet = jsonDecode(line);
-      if (packet is! Map<String, dynamic>) return;
+      final decoded = jsonDecode(line);
+      if (decoded is! Map<String, dynamic>) return;
+
       final identity = _identity;
-      final messageId = packet['id'];
-      final senderId = packet['from_id'];
-      final senderName = packet['from_name'];
-      final body = packet['body'];
-      final createdAtMicros = packet['created_at'];
+      final messageId = decoded['id'];
+      final senderId = decoded['from_id'];
+      final senderName = decoded['from_name'];
+      final body = decoded['body'];
+      final createdAtMicros = decoded['created_at'];
       if (identity == null ||
-          packet['kind'] != 'text' ||
-          packet['to_id'] != identity.id ||
+          decoded['kind'] != 'text' ||
+          decoded['to_id'] != identity.id ||
           messageId is! String ||
           !_isValidDeviceId(messageId) ||
           senderId is! String ||
@@ -219,8 +221,8 @@ class LanDiscoveryService {
         return;
       }
 
-      // Match the claimed sender to a recent discovery announcement. This
-      // filters inconsistent packets but is not cryptographic authentication.
+      // Check the claimed sender against a recently discovered LAN peer.
+      // This is a consistency check, not cryptographic authentication.
       final knownPeer = _peers[senderId];
       if (knownPeer == null ||
           knownPeer.address != socket.remoteAddress.address ||
@@ -245,57 +247,7 @@ class LanDiscoveryService {
   }
 
   bool _isValidDeviceId(String value) =>
-      RegExp(r'^[a-f0-9]{32}
-    final identity = _identity;
-    final socket = _discoverySocket;
-    final server = _server;
-    if (identity == null || socket == null || server == null) return;
-
-    final packet = utf8.encode(
-      jsonEncode({
-        'kind': 'announce',
-        'id': identity.id,
-        'name': identity.name,
-        'tcp_port': server.port,
-      }),
-    );
-    socket.send(packet, InternetAddress('255.255.255.255'), _discoveryPort);
-  }
-
-  void _prunePeers() {
-    final now = DateTime.now();
-    final before = _peers.length;
-    _peers.removeWhere(
-      (_, peer) => now.difference(peer.lastSeen) > _peerExpiry,
-    );
-    if (_peers.length != before) _emitPeers();
-  }
-
-  void _emitPeers() {
-    final peers = _peers.values.toList()
-      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    _peersController.add(peers);
-  }
-
-  Future<void> stop() async {
-    _announceTimer?.cancel();
-    _announceTimer = null;
-    _pruneTimer?.cancel();
-    _pruneTimer = null;
-    _discoverySocket?.close();
-    _discoverySocket = null;
-    await _server?.close();
-    _server = null;
-    _peers.clear();
-    _emitPeers();
-  }
-
-  Future<void> dispose() async {
-    await stop();
-    await _peersController.close();
-  }
-}
-).hasMatch(value);
+      RegExp(r'^[a-f0-9]{32}$').hasMatch(value);
 
   bool _isValidDisplayName(String value) =>
       value.trim().isNotEmpty &&

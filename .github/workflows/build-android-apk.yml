@@ -35,7 +35,6 @@ jobs:
         with:
           channel: stable
           cache: true
-          cache-dependency-path: mobile/offline_lan_chat/pubspec.yaml
 
       - name: Resolve dependencies
         run: flutter pub get
@@ -67,7 +66,6 @@ jobs:
         with:
           channel: stable
           cache: true
-          cache-dependency-path: mobile/offline_lan_chat/pubspec.yaml
 
       - name: Generate Android platform project
         run: |
@@ -104,8 +102,20 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
-      - name: Build release APK
-        run: flutter build apk --release
+      - name: Build release APK (retry once for transient SDK download failures)
+        run: |
+          for attempt in 1 2; do
+            if flutter build apk --release; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 1 ]; then
+              echo "Build failed; cleaning partial NDK download and retrying once."
+              rm -rf "$ANDROID_SDK_ROOT/ndk/28.2.13676358"
+              rm -rf "$ANDROID_SDK_ROOT/.temp"/*
+              sleep 10
+            fi
+          done
+          exit 1
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4

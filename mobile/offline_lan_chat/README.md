@@ -6,10 +6,12 @@ LocalLink is a Flutter source project for discovering nearby phones and exchangi
 
 - IPv4 UDP broadcast discovery while the app is open.
 - Direct TCP text messages with a delivery acknowledgement.
+- QR-based public-key pairing; trusted peer keys are pinned locally.
+- X25519 key agreement, HKDF-SHA256 key derivation, and AES-256-GCM authenticated message encryption.
 - Local conversation history.
 - Rename this phone from the app.
 
-File transfer, end-to-end encryption, background discovery, and group chat are not implemented yet. **Messages in this version are not encrypted. Use only on a trusted local network and do not send sensitive content.**
+File transfer, background discovery, and group chat are not implemented yet. Messages are encrypted only when both phones have paired by scanning each other's identity QR. Pairing must be repeated on each phone. The QR contains a public key, never the private key. This security branch has not yet been built or tested on physical phones; review and test it before relying on it for sensitive communication.
 
 ## Create the native platform folders
 
@@ -27,7 +29,7 @@ cp -R /tmp/offline_lan_chat_runner/ios .
 flutter pub get
 ```
 
-Before running on a device, add local-network permissions:
+Before running on a device, add local-network permissions and camera access for QR scanning:
 
 - **Android** — in `android/app/src/main/AndroidManifest.xml`, inside the `<manifest>` element and before `<application>`, add:
 
@@ -35,6 +37,7 @@ Before running on a device, add local-network permissions:
   <uses-permission android:name="android.permission.INTERNET" />
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
   <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+  <uses-permission android:name="android.permission.CAMERA" />
   ```
 
 - **iOS** — in `ios/Runner/Info.plist`, add this inside the top-level `<dict>`:

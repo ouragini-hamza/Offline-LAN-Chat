@@ -277,7 +277,6 @@ class _PeerTile extends StatelessWidget {
           'Pair via QR to enable encrypted chat',
           style: TextStyle(color: Color(0xFF718078), fontSize: 12),
         ),
-        ),
         trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 15),
         onTap: onTap,
       ),

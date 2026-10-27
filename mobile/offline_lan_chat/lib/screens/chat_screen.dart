@@ -46,7 +46,7 @@ class _ChatScreenState extends State<ChatScreen> {
       message,
     ) {
       if (message.peerId != widget.peerId || !mounted) return;
-      setState(() => _messages.add(message));
+      setState(() => _upsertMessage(message));
       _scrollToLatest();
     });
   }
@@ -68,12 +68,29 @@ class _ChatScreenState extends State<ChatScreen> {
     final history = await widget.controller.loadMessages(widget.peerId);
     if (!mounted) return;
     setState(() {
+      // A message can arrive while SQLite history is loading. Merge instead of
+      // replacing the live list, and de-duplicate by ID to avoid losing it.
+      final liveMessages = List<ChatMessage>.of(_messages);
       _messages
         ..clear()
         ..addAll(history);
+      for (final message in liveMessages) {
+        _upsertMessage(message);
+      }
+      _messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
       _loading = false;
     });
     _scrollToLatest();
+  }
+
+  void _upsertMessage(ChatMessage message) {
+    final index = _messages.indexWhere((existing) => existing.id == message.id);
+    if (index == -1) {
+      _messages.add(message);
+    } else {
+      _messages[index] = message;
+    }
+    _messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
   }
 
   Future<void> _send() async {

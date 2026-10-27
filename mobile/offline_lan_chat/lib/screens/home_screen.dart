@@ -273,11 +273,10 @@ class _PeerTile extends StatelessWidget {
           peer.name,
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
-        subtitle: FutureBuilder<bool>(
-          future: null,
-          builder: (context, snapshot) => const Text(
-            'Pair with QR before sending encrypted messages',
-            style: TextStyle(color: Color(0xFF718078), fontSize: 12),
+        subtitle: const Text(
+          'Pair via QR to enable encrypted chat',
+          style: TextStyle(color: Color(0xFF718078), fontSize: 12),
+        ),
           ),
         ),
         trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 15),

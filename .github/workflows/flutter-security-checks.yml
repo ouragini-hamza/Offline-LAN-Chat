@@ -41,7 +41,7 @@ jobs:
               "android.permission.CAMERA",
           ]
           additions = "".join(
-              f'    <uses-permission android:name="{permission}" />\\n'
+              f'    <uses-permission android:name="{permission}" />' + chr(10)
               for permission in permissions
               if f'android:name="{permission}"' not in text
           )

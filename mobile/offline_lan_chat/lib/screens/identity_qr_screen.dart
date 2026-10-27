@@ -52,7 +52,7 @@ class _IdentityQrScreenState extends State<IdentityQrScreen> {
       FilledButton.icon(onPressed: () => setState(() { _scanning = true; _handled = false; _status = null; }), icon: const Icon(Icons.qr_code_scanner), label: const Text('Scan friend’s QR')),
       if (_scanning) ...[
         const SizedBox(height: 16),
-        SizedBox(height: 300, child: ClipRRect(borderRadius: BorderRadius.circular(16), child: MobileScanner(onDetect: (capture) { final raw = capture.barcodes.firstOrNull?.rawValue; if (raw != null) _handleCode(raw); }))),
+        SizedBox(height: 300, child: ClipRRect(borderRadius: BorderRadius.circular(16), child: MobileScanner(onDetect: (capture) { final raw = capture.barcodes.isNotEmpty ? capture.barcodes.first.rawValue : null; if (raw != null) _handleCode(raw); }))),
         TextButton(onPressed: () => setState(() => _scanning = false), child: const Text('Cancel scan')),
       ],
       if (_status != null) ...[const SizedBox(height: 12), Text(_status!, style: const TextStyle(height: 1.4))],

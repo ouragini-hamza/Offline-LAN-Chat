@@ -83,6 +83,14 @@ class LanDiscoveryService {
   }) async {
     final identity = _identity;
     if (identity == null) throw StateError('Discovery is not running.');
+    if (!_isValidDeviceId(peer.id) ||
+        peer.port < 1 ||
+        peer.port > 65535 ||
+        body.trim().isEmpty ||
+        body.length > 4000 ||
+        !_isValidDeviceId(messageId)) {
+      throw ArgumentError('Invalid peer or message data.');
+    }
 
     final socket = await Socket.connect(
       InternetAddress(peer.address),
@@ -147,8 +155,12 @@ class LanDiscoveryService {
         final port = packet['tcp_port'];
         if (packet['kind'] != 'announce' ||
             id is! String ||
+            !_isValidDeviceId(id) ||
             name is! String ||
+            !_isValidDisplayName(name) ||
             port is! int ||
+            port < 1 ||
+            port > 65535 ||
             id == _identity?.id) {
           continue;
         }
@@ -183,28 +195,46 @@ class LanDiscoveryService {
   Future<void> _handleMessageLine(Socket socket, String line) async {
     try {
       if (line.length > 16 * 1024) return;
-      final packet = jsonDecode(line) as Map<String, dynamic>;
+      final packet = jsonDecode(line);
+      if (packet is! Map<String, dynamic>) return;
       final identity = _identity;
+      final messageId = packet['id'];
+      final senderId = packet['from_id'];
+      final senderName = packet['from_name'];
+      final body = packet['body'];
+      final createdAtMicros = packet['created_at'];
       if (identity == null ||
           packet['kind'] != 'text' ||
           packet['to_id'] != identity.id ||
-          packet['id'] is! String ||
-          packet['from_id'] is! String ||
-          packet['from_name'] is! String ||
-          packet['body'] is! String ||
-          (packet['body'] as String).length > 4000 ||
-          packet['created_at'] is! int) {
+          messageId is! String ||
+          !_isValidDeviceId(messageId) ||
+          senderId is! String ||
+          !_isValidDeviceId(senderId) ||
+          senderName is! String ||
+          !_isValidDisplayName(senderName) ||
+          body is! String ||
+          body.trim().isEmpty ||
+          body.length > 4000 ||
+          createdAtMicros is! int) {
+        return;
+      }
+
+      // Match the claimed sender to a recent discovery announcement. This
+      // filters inconsistent packets but is not cryptographic authentication.
+      final knownPeer = _peers[senderId];
+      if (knownPeer == null ||
+          knownPeer.address != socket.remoteAddress.address ||
+          knownPeer.name != senderName ||
+          DateTime.now().difference(knownPeer.lastSeen) > _peerExpiry) {
         return;
       }
 
       final incoming = IncomingText(
-        id: packet['id'] as String,
-        peerId: packet['from_id'] as String,
-        peerName: packet['from_name'] as String,
-        body: packet['body'] as String,
-        createdAt: DateTime.fromMicrosecondsSinceEpoch(
-          packet['created_at'] as int,
-        ),
+        id: messageId,
+        peerId: senderId,
+        peerName: senderName,
+        body: body,
+        createdAt: DateTime.fromMicrosecondsSinceEpoch(createdAtMicros),
       );
       await _onIncomingText?.call(incoming);
       socket.write('${jsonEncode({'kind': 'ack', 'id': incoming.id})}\n');
@@ -213,6 +243,64 @@ class LanDiscoveryService {
       // Ignore invalid packets without closing the discovery service.
     }
   }
+
+  bool _isValidDeviceId(String value) =>
+      RegExp(r'^[a-f0-9]{32}
+    final identity = _identity;
+    final socket = _discoverySocket;
+    final server = _server;
+    if (identity == null || socket == null || server == null) return;
+
+    final packet = utf8.encode(
+      jsonEncode({
+        'kind': 'announce',
+        'id': identity.id,
+        'name': identity.name,
+        'tcp_port': server.port,
+      }),
+    );
+    socket.send(packet, InternetAddress('255.255.255.255'), _discoveryPort);
+  }
+
+  void _prunePeers() {
+    final now = DateTime.now();
+    final before = _peers.length;
+    _peers.removeWhere(
+      (_, peer) => now.difference(peer.lastSeen) > _peerExpiry,
+    );
+    if (_peers.length != before) _emitPeers();
+  }
+
+  void _emitPeers() {
+    final peers = _peers.values.toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    _peersController.add(peers);
+  }
+
+  Future<void> stop() async {
+    _announceTimer?.cancel();
+    _announceTimer = null;
+    _pruneTimer?.cancel();
+    _pruneTimer = null;
+    _discoverySocket?.close();
+    _discoverySocket = null;
+    await _server?.close();
+    _server = null;
+    _peers.clear();
+    _emitPeers();
+  }
+
+  Future<void> dispose() async {
+    await stop();
+    await _peersController.close();
+  }
+}
+).hasMatch(value);
+
+  bool _isValidDisplayName(String value) =>
+      value.trim().isNotEmpty &&
+      value.length <= 32 &&
+      !RegExp(r'[\x00-\x1F\x7F]').hasMatch(value);
 
   Future<void> _announce() async {
     final identity = _identity;

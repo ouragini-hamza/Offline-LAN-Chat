@@ -25,7 +25,7 @@ class ChatController extends ChangeNotifier {
   String? networkWarning;
 
   DeviceIdentity get identity =>
-      _identity ?? const DeviceIdentity(id: '', name: 'My phone');
+      _identity ?? const DeviceIdentity(id: '', name: 'My phone', publicKey: '');
   List<NearbyPeer> get peers => List.unmodifiable(_peers);
   List<ConversationPreview> get recentConversations =>
       List.unmodifiable(_recentConversations);
@@ -56,6 +56,16 @@ class ChatController extends ChangeNotifier {
 
   Future<void> refreshDiscovery() => _lan.refreshDiscovery();
 
+  Future<List<TrustedPeer>> get trustedPeers => _identityStore.trustedPeers();
+
+  Future<bool> isTrusted(String peerId) async =>
+      await _identityStore.trustedPeer(peerId) != null;
+
+  Future<void> trustPeer({required String id, required String name, required String publicKey}) async {
+    await _identityStore.trustPeer(id: id, name: name, publicKey: publicKey);
+    notifyListeners();
+  }
+
   Future<ChatMessage> sendText(NearbyPeer peer, String text) async {
     final body = text.trim();
     if (body.isEmpty)
@@ -78,11 +88,16 @@ class ChatController extends ChangeNotifier {
     notifyListeners();
 
     try {
+      final trusted = await _identityStore.trustedPeer(peer.id);
+      if (trusted == null || trusted.publicKey != peer.publicKey) {
+        throw StateError('Pair with this device by scanning its QR code first.');
+      }
       await _lan.sendText(
         peer: peer,
         messageId: message.id,
         body: message.body,
         createdAt: message.createdAt,
+        recipientPublicKey: trusted.publicKey,
       );
       final sent = message.withDeliveryStatus('sent');
       await _database.updateDeliveryStatus(sent.id, sent.deliveryStatus);

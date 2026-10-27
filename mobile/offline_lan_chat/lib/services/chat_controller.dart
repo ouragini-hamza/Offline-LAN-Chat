@@ -77,6 +77,7 @@ class ChatController extends ChangeNotifier {
     await _refreshRecentConversations();
     notifyListeners();
 
+    var deliveryStatus = 'sent';
     try {
       await _lan.sendText(
         peer: peer,
@@ -84,18 +85,17 @@ class ChatController extends ChangeNotifier {
         body: message.body,
         createdAt: message.createdAt,
       );
-      final sent = message.withDeliveryStatus('sent');
-      await _database.updateDeliveryStatus(sent.id, sent.deliveryStatus);
-      await _refreshRecentConversations();
-      notifyListeners();
-      return sent;
     } on Object {
-      final failed = message.withDeliveryStatus('failed');
-      await _database.updateDeliveryStatus(failed.id, failed.deliveryStatus);
-      await _refreshRecentConversations();
-      notifyListeners();
-      return failed;
+      // Network failures are shown in the conversation. Database failures
+      // below propagate so the UI does not misreport them as delivery failures.
+      deliveryStatus = 'failed';
     }
+
+    final updated = message.withDeliveryStatus(deliveryStatus);
+    await _database.updateDeliveryStatus(updated.id, updated.deliveryStatus);
+    await _refreshRecentConversations();
+    notifyListeners();
+    return updated;
   }
 
   Future<void> renameDevice(String name) async {

@@ -102,6 +102,7 @@ class LanDiscoveryService {
 
     final acknowledgement = Completer<void>();
     final subscription = socket
+        .cast<List<int>>()
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen(
@@ -183,6 +184,7 @@ class LanDiscoveryService {
   void _handleConnection(Socket socket) {
     socket.setOption(SocketOption.tcpNoDelay, true);
     socket
+        .cast<List<int>>()
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen(

@@ -1,13 +1,6 @@
 name: Flutter Android APK
 
 on:
-  push:
-    branches:
-      - main
-      - fix/chat-reliability-security-review
-    paths:
-      - "mobile/offline_lan_chat/**"
-      - ".github/workflows/build-android-apk.yml"
   pull_request:
     branches:
       - main
@@ -42,8 +35,13 @@ jobs:
       - name: Analyze
         run: flutter analyze
 
-      - name: Run tests
-        run: flutter test
+      - name: Run tests when a test suite exists
+        run: |
+          if [ -d test ]; then
+            flutter test
+          else
+            echo "::notice::No test/ directory exists yet; skipping Flutter tests."
+          fi
 
   build-apk:
     name: Build installable Android APK

@@ -32,7 +32,7 @@ class _IdentityQrScreenState extends State<IdentityQrScreen> {
       }
       await widget.controller.trustPeer(id: data['id'] as String, name: data['name'] as String, publicKey: data['public_key'] as String);
       if (!mounted) return;
-      setState(() { _scanning = false; _status = 'Trusted identity saved for \${data['name']}.'; });
+      setState(() { _scanning = false; _status = 'Trusted identity saved for ' + (data['name'] as String) + '.'; });
     } on Object catch (error) {
       if (!mounted) return;
       setState(() => _status = 'Could not trust this QR: $error');
@@ -47,7 +47,7 @@ class _IdentityQrScreenState extends State<IdentityQrScreen> {
       const SizedBox(height: 18),
       Center(child: Container(color: Colors.white, padding: const EdgeInsets.all(12), child: QrImageView(data: _payload, size: 240))),
       const SizedBox(height: 8),
-      SelectableText('Device: \${widget.controller.identity.name}\nID: \${widget.controller.identity.id}', textAlign: TextAlign.center),
+      SelectableText('Device: ' + widget.controller.identity.name + '\\nID: ' + widget.controller.identity.id, textAlign: TextAlign.center),
       const SizedBox(height: 22),
       FilledButton.icon(onPressed: () => setState(() { _scanning = true; _handled = false; _status = null; }), icon: const Icon(Icons.qr_code_scanner), label: const Text('Scan friend’s QR')),
       if (_scanning) ...[

@@ -45,6 +45,8 @@ Before running on a device, add local-network permissions and camera access for 
   ```xml
   <key>NSLocalNetworkUsageDescription</key>
   <string>LocalLink uses your local network to find nearby phones and deliver messages directly.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>LocalLink uses the camera to scan a friend's identity QR for secure pairing.</string>
   ```
 
 Run on two physical phones connected to the same Wi-Fi network:

@@ -285,7 +285,7 @@ class _MessageBubble extends StatelessWidget {
               '${_clockTime(message.createdAt)}${outgoing ? ' · ${_statusLabel(message.deliveryStatus)}' : ''}',
               style: TextStyle(
                 color: outgoing
-                    ? Colors.white.withOpacity(0.76)
+                    ? Colors.white.withValues(alpha: 0.76)
                     : const Color(0xFF87928B),
                 fontSize: 10,
               ),

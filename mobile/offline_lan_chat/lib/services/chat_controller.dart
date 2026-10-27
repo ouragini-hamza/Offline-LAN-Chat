@@ -58,8 +58,9 @@ class ChatController extends ChangeNotifier {
 
   Future<ChatMessage> sendText(NearbyPeer peer, String text) async {
     final body = text.trim();
-    if (body.isEmpty)
+    if (body.isEmpty) {
       throw ArgumentError.value(text, 'text', 'Cannot be empty');
+    }
     if (body.length > 4000) {
       throw ArgumentError.value(text, 'text', 'Message is too long');
     }

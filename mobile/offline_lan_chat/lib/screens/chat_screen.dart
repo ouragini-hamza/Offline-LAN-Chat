@@ -103,7 +103,7 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final message = await widget.controller.sendText(peer, text);
       if (!mounted) return;
-      setState(() => _messages.add(message));
+      setState(() => _upsertMessage(message));
       _scrollToLatest();
       if (message.deliveryStatus == 'failed') {
         ScaffoldMessenger.of(context).showSnackBar(

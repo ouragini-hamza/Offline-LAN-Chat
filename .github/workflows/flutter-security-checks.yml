@@ -6,6 +6,10 @@ on:
   push:
     branches: [security/qr-identity-encryption]
 
+concurrency:
+  group: flutter-security-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

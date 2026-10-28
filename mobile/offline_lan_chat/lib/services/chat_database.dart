@@ -41,6 +41,25 @@ class ChatDatabase {
     );
   }
 
+  Future<bool> saveIncomingMessage(ChatMessage message) async {
+    final database = await _db;
+    final existing = await database.query(
+      'messages',
+      columns: const ['id'],
+      where: 'id = ?',
+      whereArgs: [message.id],
+      limit: 1,
+    );
+    if (existing.isNotEmpty) return false;
+
+    await database.insert(
+      'messages',
+      message.toDatabase(),
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    return true;
+  }
+
   Future<void> updateDeliveryStatus(String id, String status) async {
     final database = await _db;
     await database.update(

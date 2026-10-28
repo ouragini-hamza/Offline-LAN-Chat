@@ -1,4 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:file_picker/file_picker.dart';
+import 'package:cross_file/cross_file.dart';
+import 'package:share_plus/share_plus.dart';
 
 import 'package:flutter/material.dart';
 
@@ -29,6 +33,8 @@ class _ChatScreenState extends State<ChatScreen> {
   StreamSubscription<ChatMessage>? _incomingSubscription;
   bool _loading = true;
   bool _sending = false;
+  bool _sendingFile = false;
+  double _fileProgress = 0;
 
   NearbyPeer? get _activePeer {
     for (final peer in widget.controller.peers) {
@@ -107,6 +113,47 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+
+  Future<void> _sendFile() async {
+    final peer = _activePeer;
+    if (_sendingFile || _sending || peer == null) return;
+    final selection = await FilePicker.platform.pickFiles(allowMultiple: false, withData: true);
+    if (selection == null || !mounted) return;
+    final file = selection.files.single;
+    final bytes = file.bytes;
+    if (bytes == null || bytes.isEmpty || bytes.length > 10 * 1024 * 1024) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Choose a readable file no larger than 10 MB.'),
+      ));
+      return;
+    }
+    setState(() { _sendingFile = true; _fileProgress = 0; });
+    try {
+      final message = await widget.controller.sendFile(
+        peer: peer,
+        fileName: file.name,
+        bytes: bytes,
+        localPath: file.path ?? '',
+        onProgress: (value) {
+          if (mounted) setState(() => _fileProgress = value);
+        },
+      );
+      if (!mounted) return;
+      setState(() => _messages.add(message));
+      if (message.deliveryStatus == 'failed') {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('File transfer failed. Check the Wi-Fi connection.'),
+        ));
+      }
+      _scrollToLatest();
+    } on Object catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not send file: $error')));
+    } finally {
+      if (mounted) setState(() { _sendingFile = false; _fileProgress = 0; });
+    }
+  }
+
   void _scrollToLatest() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
@@ -162,8 +209,10 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
             _Composer(
               controller: _textController,
-              enabled: isOnline && !_sending,
-              sending: _sending,
+              enabled: isOnline && !_sending && !_sendingFile,
+              sending: _sending || _sendingFile,
+              fileProgress: _fileProgress,
+              onAttach: _sendFile,
               onSend: _send,
             ),
           ],
@@ -259,10 +308,7 @@ class _MessageBubble extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text(
-              message.body,
-              style: TextStyle(color: textColor, fontSize: 15, height: 1.35),
-            ),
+            _MessageBody(message: message, textColor: textColor),
             const SizedBox(height: 5),
             Text(
               '${_clockTime(message.createdAt)}${outgoing ? ' · ${_statusLabel(message.deliveryStatus)}' : ''}',
@@ -280,17 +326,74 @@ class _MessageBubble extends StatelessWidget {
   }
 }
 
+
+class _MessageBody extends StatelessWidget {
+  const _MessageBody({required this.message, required this.textColor});
+  final ChatMessage message;
+  final Color textColor;
+
+  @override
+  Widget build(BuildContext context) {
+    Map<String, dynamic>? attachment;
+    try {
+      final decoded = jsonDecode(message.body);
+      if (decoded is Map<String, dynamic> && decoded['_locallink_file'] == 'v1') {
+        attachment = decoded;
+      }
+    } on Object {
+      // Ordinary text message.
+    }
+    if (attachment == null) {
+      return Text(message.body, style: TextStyle(color: textColor, fontSize: 15, height: 1.35));
+    }
+    final name = attachment['name'] as String? ?? 'File';
+    final path = attachment['path'] as String? ?? '';
+    final size = attachment['size'] as int? ?? 0;
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      const Icon(Icons.attach_file_rounded, size: 22),
+      const SizedBox(width: 8),
+      Flexible(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(name, style: TextStyle(color: textColor, fontWeight: FontWeight.w600)),
+        Text(_formatFileSize(size), style: TextStyle(color: textColor.withValues(alpha: 0.75), fontSize: 11)),
+      ])),
+      if (path.isNotEmpty)
+        IconButton(
+          tooltip: 'Share or save file',
+          onPressed: () async {
+            try {
+              await Share.shareXFiles([XFile(path)], text: 'Shared from LocalLink: $name');
+            } on Object catch (error) {
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not share file: $error')));
+            }
+          },
+          icon: Icon(Icons.ios_share_rounded, color: textColor),
+        ),
+    ]);
+  }
+}
+
+String _formatFileSize(int bytes) {
+  if (bytes < 1024) return '$bytes B';
+  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+  return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+}
+
 class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller,
     required this.enabled,
     required this.sending,
+    required this.fileProgress,
+    required this.onAttach,
     required this.onSend,
   });
 
   final TextEditingController controller;
   final bool enabled;
   final bool sending;
+  final double fileProgress;
+  final VoidCallback onAttach;
   final VoidCallback onSend;
 
   @override
@@ -304,6 +407,11 @@ class _Composer extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
+          IconButton(
+            tooltip: 'Attach file (max 10 MB)',
+            onPressed: enabled ? onAttach : null,
+            icon: const Icon(Icons.attach_file_rounded),
+          ),
           Expanded(
             child: TextField(
               controller: controller,
@@ -324,6 +432,8 @@ class _Composer extends StatelessWidget {
               ),
             ),
           ),
+          if (sending && fileProgress > 0)
+            SizedBox(width: 32, child: LinearProgressIndicator(value: fileProgress)),
           const SizedBox(width: 9),
           Padding(
             padding: const EdgeInsets.only(bottom: 2),

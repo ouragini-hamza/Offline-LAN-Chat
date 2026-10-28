@@ -1,8 +1,13 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../models/chat_message.dart';
 import '../models/nearby_peer.dart';
 import '../services/chat_controller.dart';
+import '../services/identity_store.dart';
+import 'group_chat_screen.dart';
 import 'chat_screen.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -22,9 +27,9 @@ class HomeScreen extends StatelessWidget {
         ),
         actions: [
           IconButton(
-            tooltip: 'Change device name',
-            onPressed: () => _editDeviceName(context),
-            icon: const Icon(Icons.edit_outlined),
+            tooltip: 'Edit profile',
+            onPressed: () => _editProfile(context),
+            icon: const Icon(Icons.account_circle_outlined),
           ),
           const SizedBox(width: 8),
         ],
@@ -59,9 +64,48 @@ class HomeScreen extends StatelessWidget {
                             context,
                             peerId: peer.id,
                             peerName: peer.name,
+                            peer: peer,
                           ),
                         ),
                       ),
+                    const SizedBox(height: 28),
+                    const SizedBox(height: 28),
+                    Row(children: [
+                      const Expanded(child: _SectionHeading(
+                        title: 'Groups',
+                        caption: 'Local groups on this Wi-Fi',
+                      )),
+                      IconButton(
+                        tooltip: 'Create group',
+                        onPressed: () => _createGroup(context),
+                        icon: const Icon(Icons.group_add_outlined),
+                      ),
+                    ]),
+                    const SizedBox(height: 8),
+                    if (controller.groups.isEmpty)
+                      const _EmptyCard(
+                        icon: Icons.groups_outlined,
+                        title: 'No groups yet',
+                        message: 'Create a group and choose people nearby.',
+                      )
+                    else
+                      ...controller.groups.map((group) => Card(
+                        color: Colors.white,
+                        elevation: 0,
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          leading: const CircleAvatar(
+                            backgroundColor: Color(0xFFE7F2EC),
+                            child: Icon(Icons.groups_rounded, color: Color(0xFF28674F)),
+                          ),
+                          title: Text(group.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                          subtitle: Text('${group.memberIds.length} members · local Wi-Fi'),
+                          trailing: const Icon(Icons.chevron_right_rounded),
+                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                            builder: (_) => GroupChatScreen(controller: controller, group: group),
+                          )),
+                        ),
+                      )),
                     const SizedBox(height: 28),
                     const _SectionHeading(
                       title: 'Recent chats',
@@ -95,6 +139,66 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
+  Future<void> _createGroup(BuildContext context) async {
+    final nameController = TextEditingController();
+    final selected = <String>{};
+    final draft = await showDialog<_GroupDraft>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Create a group'),
+          content: SizedBox(
+            width: 360,
+            child: SingleChildScrollView(child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  maxLength: 48,
+                  decoration: const InputDecoration(labelText: 'Group name'),
+                ),
+                const SizedBox(height: 8),
+                if (controller.peers.isEmpty)
+                  const Text('No nearby phones yet. Connect to the same Wi-Fi first.')
+                else
+                  ...controller.peers.map((peer) => CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: selected.contains(peer.id),
+                    title: Text(peer.name),
+                    subtitle: Text(peer.id.substring(0, peer.id.length > 8 ? 8 : peer.id.length)),
+                    onChanged: (value) => setDialogState(() {
+                      if (value == true) { selected.add(peer.id); } else { selected.remove(peer.id); }
+                    }),
+                  )),
+              ],
+            )),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, _GroupDraft(
+                name: nameController.text, memberIds: selected.toList(),
+              )),
+              child: const Text('Create'),
+            ),
+          ],
+        ),
+      ),
+    );
+    nameController.dispose();
+    if (draft == null || !context.mounted) return;
+    try {
+      await controller.createGroup(name: draft.name, memberIds: draft.memberIds);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Group created. Members must be online to receive messages.'),
+      ));
+    } on Object catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not create group: $error')));
+    }
+  }
+
   NearbyPeer? _peerById(String id) {
     for (final peer in controller.peers) {
       if (peer.id == id) return peer;
@@ -106,8 +210,20 @@ class HomeScreen extends StatelessWidget {
     BuildContext context, {
     required String peerId,
     required String peerName,
-  }) {
-    return Navigator.of(context).push(
+    NearbyPeer? peer,
+  }) async {
+    try {
+      if (peer != null) await controller.trustDiscoveredPeer(peer);
+    } on StateError catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.message.toString())),
+        );
+      }
+      return;
+    }
+    if (!context.mounted) return;
+    await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => ChatScreen(
           controller: controller,
@@ -118,47 +234,141 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Future<void> _editDeviceName(BuildContext context) async {
-    final fieldController = TextEditingController(
-      text: controller.identity.name,
-    );
-    final name = await showDialog<String>(
+  Future<void> _editProfile(BuildContext context) async {
+    final profile = await showDialog<_ProfileDraft>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Your device name'),
-        content: TextField(
-          controller: fieldController,
-          autofocus: true,
-          maxLength: 32,
-          textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(
-            hintText: 'Name shown to nearby phones',
-          ),
-          onSubmitted: (value) => Navigator.of(context).pop(value),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(fieldController.text),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
+      builder: (_) => _ProfileDialog(identity: controller.identity),
     );
-    fieldController.dispose();
-    if (name == null || !context.mounted) return;
+    if (profile == null || !context.mounted) return;
 
     try {
-      await controller.renameDevice(name);
+      await controller.updateProfile(
+        name: profile.name,
+        avatarBase64: profile.avatarBase64,
+      );
     } on ArgumentError catch (error) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.message?.toString() ?? 'Invalid name.')),
+        SnackBar(content: Text(error.message.toString())),
       );
     }
+  }
+}
+
+class _GroupDraft {
+  const _GroupDraft({required this.name, required this.memberIds});
+  final String name;
+  final List<String> memberIds;
+}
+
+class _ProfileDraft {
+  const _ProfileDraft({required this.name, required this.avatarBase64});
+
+  final String name;
+  final String? avatarBase64;
+}
+
+class _ProfileDialog extends StatefulWidget {
+  const _ProfileDialog({required this.identity});
+
+  final DeviceIdentity identity;
+
+  @override
+  State<_ProfileDialog> createState() => _ProfileDialogState();
+}
+
+class _ProfileDialogState extends State<_ProfileDialog> {
+  static const _maxAvatarCharacters = 12 * 1024;
+  late final TextEditingController _fieldController = TextEditingController(
+    text: widget.identity.name,
+  );
+  String? _avatarBase64;
+  String? _photoError;
+
+  @override
+  void initState() {
+    super.initState();
+    _avatarBase64 = widget.identity.avatarBase64;
+  }
+
+  @override
+  void dispose() {
+    _fieldController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    Navigator.of(context).pop(
+      _ProfileDraft(
+        name: _fieldController.text,
+        avatarBase64: _avatarBase64,
+      ),
+    );
+  }
+
+  Future<void> _selectPhoto() async {
+    final photo = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 128,
+      maxHeight: 128,
+      imageQuality: 35,
+    );
+    if (photo == null || !mounted) return;
+    final avatarBase64 = base64Encode(await photo.readAsBytes());
+    if (!mounted) return;
+    if (avatarBase64.length > _maxAvatarCharacters) {
+      setState(() => _photoError = 'Choose a smaller photo.');
+      return;
+    }
+    setState(() {
+      _avatarBase64 = avatarBase64;
+      _photoError = null;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Your profile'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _DeviceAvatar(avatarBase64: _avatarBase64, size: 72),
+          TextButton.icon(
+            onPressed: _selectPhoto,
+            icon: const Icon(Icons.photo_outlined),
+            label: const Text('Choose photo'),
+          ),
+          if (_avatarBase64 != null)
+            TextButton(
+              onPressed: () => setState(() => _avatarBase64 = null),
+              child: const Text('Remove photo'),
+            ),
+          if (_photoError != null)
+            Text(_photoError!, style: const TextStyle(color: Colors.red)),
+          TextField(
+            controller: _fieldController,
+            autofocus: true,
+            maxLength: 32,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(
+              hintText: 'Name shown to nearby phones',
+            ),
+            onSubmitted: (_) => _submit(),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: const Text('Save'),
+        ),
+      ],
+    );
   }
 }
 
@@ -262,14 +472,14 @@ class _PeerTile extends StatelessWidget {
       ),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-        leading: const _DeviceAvatar(),
+        leading: _DeviceAvatar(avatarBase64: peer.avatarBase64),
         title: Text(
           peer.name,
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
         subtitle: const Text(
-          'Available to chat',
-          style: TextStyle(color: Color(0xFF718078), fontSize: 13),
+          'Tap to start a direct local chat',
+          style: TextStyle(color: Color(0xFF718078), fontSize: 12),
         ),
         trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 15),
         onTap: onTap,
@@ -339,22 +549,38 @@ class _ConversationTile extends StatelessWidget {
 }
 
 class _DeviceAvatar extends StatelessWidget {
-  const _DeviceAvatar();
+  const _DeviceAvatar({this.avatarBase64, this.size = 44});
+
+  final String? avatarBase64;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 44,
-      height: 44,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
         color: const Color(0xFFE7F2EC),
         borderRadius: BorderRadius.circular(15),
       ),
-      child: const Icon(
-        Icons.smartphone_rounded,
-        color: Color(0xFF28674F),
-        size: 22,
-      ),
+      child: avatarBase64 == null
+          ? Icon(
+              Icons.person_outline_rounded,
+              color: const Color(0xFF28674F),
+              size: size / 2,
+            )
+          : ClipRRect(
+              borderRadius: BorderRadius.circular(size / 3),
+              child: Image.memory(
+                base64Decode(avatarBase64!),
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => Icon(
+                  Icons.person_outline_rounded,
+                  color: const Color(0xFF28674F),
+                  size: size / 2,
+                ),
+              ),
+            ),
     );
   }
 }
@@ -452,7 +678,7 @@ class _PrivacyNote extends StatelessWidget {
         SizedBox(width: 8),
         Expanded(
           child: Text(
-            'Chats stay on your devices. This early version does not encrypt messages yet.',
+            'Paired messages are encrypted before they leave your phone. Keep your QR pairing private.',
             style: TextStyle(
               color: Color(0xFF718078),
               fontSize: 12,

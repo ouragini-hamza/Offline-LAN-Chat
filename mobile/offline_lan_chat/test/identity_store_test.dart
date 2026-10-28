@@ -1,0 +1,47 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:offline_lan_chat/services/identity_store.dart';
+
+void main() {
+  group('DeviceIdentity', () {
+    test('copyWith changes the name and preserves identity keys', () {
+      const original = DeviceIdentity(
+        id: 'device-123',
+        name: 'Phone A',
+        publicKey: 'cHVibGljLWtleQ==',
+      );
+
+      final renamed = original.copyWith(name: 'Phone B');
+
+      expect(renamed.id, original.id);
+      expect(renamed.publicKey, original.publicKey);
+      expect(renamed.name, 'Phone B');
+    });
+
+    test('copyWith preserves the optional profile photo', () {
+      const original = DeviceIdentity(
+        id: 'device-123',
+        name: 'Phone A',
+        publicKey: 'cHVibGljLWtleQ==',
+        avatarBase64: 'cGhvdG8=',
+      );
+
+      final renamed = original.copyWith(name: 'Phone B');
+
+      expect(renamed.avatarBase64, original.avatarBase64);
+    });
+
+    test('copyWith without a name preserves all values', () {
+      const original = DeviceIdentity(
+        id: 'device-123',
+        name: 'Phone A',
+        publicKey: 'cHVibGljLWtleQ==',
+      );
+
+      final copy = original.copyWith();
+
+      expect(copy.id, original.id);
+      expect(copy.name, original.name);
+      expect(copy.publicKey, original.publicKey);
+    });
+  });
+}

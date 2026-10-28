@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 class ChatMessage {
   const ChatMessage({
     required this.id,
@@ -73,9 +75,21 @@ class ConversationPreview {
     return ConversationPreview(
       peerId: row['peer_id']! as String,
       peerName: row['peer_name']! as String,
-      lastMessage: row['body']! as String,
+      lastMessage: _previewBody(row['body']! as String),
       createdAt: DateTime.fromMicrosecondsSinceEpoch(row['created_at']! as int),
       isOutgoing: (row['is_outgoing']! as int) == 1,
     );
   }
+}
+
+String _previewBody(String body) {
+  try {
+    final decoded = jsonDecode(body);
+    if (decoded is Map<String, dynamic> && decoded['_locallink_file'] == 'v1') {
+      return '📎 ${decoded['name'] ?? 'File'}';
+    }
+  } on Object {
+    // Ordinary text message.
+  }
+  return body;
 }

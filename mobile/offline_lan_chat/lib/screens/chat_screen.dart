@@ -209,8 +209,10 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
             _Composer(
               controller: _textController,
-              enabled: isOnline && !_sending,
-              sending: _sending,
+              enabled: isOnline && !_sending && !_sendingFile,
+              sending: _sending || _sendingFile,
+              fileProgress: _fileProgress,
+              onAttach: _sendFile,
               onSend: _send,
             ),
           ],
@@ -332,12 +334,16 @@ class _Composer extends StatelessWidget {
     required this.controller,
     required this.enabled,
     required this.sending,
+    required this.fileProgress,
+    required this.onAttach,
     required this.onSend,
   });
 
   final TextEditingController controller;
   final bool enabled;
   final bool sending;
+  final double fileProgress;
+  final VoidCallback onAttach;
   final VoidCallback onSend;
 
   @override

@@ -32,6 +32,17 @@ jobs:
       - name: Generate Android runner files
         run: flutter create --empty --platforms=android --project-name offline_lan_chat --org app.locallink .
 
+      - name: Set Android compile SDK to 36
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path("android/app/build.gradle.kts")
+          text = path.read_text()
+          old = "compileSdk = flutter.compileSdkVersion"
+          if old not in text:
+              raise SystemExit("Could not find compileSdk setting in generated Gradle file")
+          path.write_text(text.replace(old, "compileSdk = 36", 1))
+
       - name: Add Android network and camera permissions
         shell: python
         run: |

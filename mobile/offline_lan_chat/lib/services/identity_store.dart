@@ -10,6 +10,7 @@ class DeviceIdentity {
     required this.id,
     required this.name,
     required this.publicKey,
+    this.avatarBase64,
   });
 
   final String id;
@@ -17,11 +18,13 @@ class DeviceIdentity {
   /// Base64-encoded X25519 public key. The matching private key never leaves
   /// secure storage.
   final String publicKey;
+  final String? avatarBase64;
 
-  DeviceIdentity copyWith({String? name}) => DeviceIdentity(
+  DeviceIdentity copyWith({String? name, String? avatarBase64}) => DeviceIdentity(
         id: id,
         name: name ?? this.name,
         publicKey: publicKey,
+        avatarBase64: avatarBase64 ?? this.avatarBase64,
       );
 }
 
@@ -40,6 +43,7 @@ class TrustedPeer {
 class IdentityStore {
   static const _idKey = 'device_id';
   static const _nameKey = 'device_name';
+  static const _avatarKey = 'device_avatar_v1';
   static const _privateKeyKey = 'device_x25519_private_v1';
   static const _publicKeyKey = 'device_x25519_public_v1';
   static const _trustedPeersKey = 'trusted_peers_v1';
@@ -71,7 +75,12 @@ class IdentityStore {
       await _secureStorage.write(key: _publicKeyKey, value: publicKey);
     }
 
-    return DeviceIdentity(id: id, name: name, publicKey: publicKey);
+    return DeviceIdentity(
+      id: id,
+      name: name,
+      publicKey: publicKey,
+      avatarBase64: preferences.getString(_avatarKey),
+    );
   }
 
   Future<SimpleKeyPair> loadPrivateKeyPair(DeviceIdentity identity) async {
@@ -92,6 +101,15 @@ class IdentityStore {
   Future<void> saveName(String name) async {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString(_nameKey, name.trim());
+  }
+
+  Future<void> saveAvatar(String? avatarBase64) async {
+    final preferences = await SharedPreferences.getInstance();
+    if (avatarBase64 == null) {
+      await preferences.remove(_avatarKey);
+      return;
+    }
+    await preferences.setString(_avatarKey, avatarBase64);
   }
 
   Future<List<TrustedPeer>> trustedPeers() async {

@@ -17,6 +17,19 @@ void main() {
       expect(renamed.name, 'Phone B');
     });
 
+    test('copyWith preserves the optional profile photo', () {
+      const original = DeviceIdentity(
+        id: 'device-123',
+        name: 'Phone A',
+        publicKey: 'cHVibGljLWtleQ==',
+        avatarBase64: 'cGhvdG8=',
+      );
+
+      final renamed = original.copyWith(name: 'Phone B');
+
+      expect(renamed.avatarBase64, original.avatarBase64);
+    });
+
     test('copyWith without a name preserves all values', () {
       const original = DeviceIdentity(
         id: 'device-123',

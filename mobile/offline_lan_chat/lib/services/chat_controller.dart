@@ -66,6 +66,18 @@ class ChatController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> trustDiscoveredPeer(NearbyPeer peer) async {
+    final existing = await _identityStore.trustedPeer(peer.id);
+    if (existing != null && existing.publicKey != peer.publicKey) {
+      throw StateError('This profile identity changed. Remove it before trusting the new key.');
+    }
+    await _identityStore.trustPeer(
+      id: peer.id,
+      name: peer.name,
+      publicKey: peer.publicKey,
+    );
+  }
+
   Future<ChatMessage> sendText(NearbyPeer peer, String text) async {
     final body = text.trim();
     if (body.isEmpty)
@@ -113,15 +125,21 @@ class ChatController extends ChangeNotifier {
     }
   }
 
-  Future<void> renameDevice(String name) async {
+  Future<void> updateProfile({required String name, String? avatarBase64}) async {
     final cleanName = name.trim();
     if (cleanName.isEmpty || cleanName.length > 32) {
       throw ArgumentError.value(name, 'name', 'Use 1–32 characters.');
     }
 
-    final updatedIdentity = identity.copyWith(name: cleanName);
+    final updatedIdentity = DeviceIdentity(
+      id: identity.id,
+      name: cleanName,
+      publicKey: identity.publicKey,
+      avatarBase64: avatarBase64,
+    );
     _identity = updatedIdentity;
     await _identityStore.saveName(cleanName);
+    await _identityStore.saveAvatar(avatarBase64);
     try {
       await _lan.updateIdentity(updatedIdentity);
       networkWarning = null;
@@ -130,6 +148,10 @@ class ChatController extends ChangeNotifier {
           'The name was saved, but nearby devices may not see it until the next scan.';
     }
     notifyListeners();
+  }
+
+  Future<void> renameDevice(String name) {
+    return updateProfile(name: name, avatarBase64: identity.avatarBase64);
   }
 
   Future<void> _saveIncoming(IncomingText incoming) async {
@@ -143,7 +165,8 @@ class ChatController extends ChangeNotifier {
       deliveryStatus: 'received',
     );
     try {
-      await _database.saveMessage(message);
+      final isNewMessage = await _database.saveIncomingMessage(message);
+      if (!isNewMessage) return;
       _incomingMessages.add(message);
       await _refreshRecentConversations();
       notifyListeners();

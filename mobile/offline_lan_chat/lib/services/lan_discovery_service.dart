@@ -24,6 +24,7 @@ class IncomingText {
 
 class LanDiscoveryService {
   static const _discoveryPort = 45454;
+  static const _maxAvatarCharacters = 12 * 1024;
   static const _announceInterval = Duration(seconds: 3);
   static const _peerExpiry = Duration(seconds: 12);
 
@@ -164,15 +165,19 @@ class LanDiscoveryService {
         final name = packet['name'];
         final port = packet['tcp_port'];
         final publicKey = packet['public_key'];
+        final avatar = packet['avatar'];
         if (packet['kind'] != 'announce' ||
             id is! String ||
             name is! String ||
             port is! int ||
             publicKey is! String ||
             publicKey.isEmpty ||
+            (avatar != null &&
+                (avatar is! String || avatar.length > _maxAvatarCharacters)) ||
             id == _identity?.id) {
           continue;
         }
+        if (avatar is String) base64Decode(avatar);
 
         _peers[id] = NearbyPeer(
           id: id,
@@ -181,6 +186,7 @@ class LanDiscoveryService {
           port: port,
           lastSeen: DateTime.now(),
           publicKey: publicKey,
+          avatarBase64: avatar as String?,
         );
         _emitPeers();
       } catch (_) {
@@ -261,6 +267,7 @@ class LanDiscoveryService {
     final server = _server;
     if (identity == null || socket == null || server == null) return;
 
+    final avatar = identity.avatarBase64;
     final packet = utf8.encode(
       jsonEncode({
         'kind': 'announce',
@@ -268,6 +275,8 @@ class LanDiscoveryService {
         'name': identity.name,
         'tcp_port': server.port,
         'public_key': identity.publicKey,
+        if (avatar != null && avatar.length <= _maxAvatarCharacters)
+          'avatar': avatar,
       }),
     );
     socket.send(packet, InternetAddress('255.255.255.255'), _discoveryPort);

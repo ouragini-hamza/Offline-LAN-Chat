@@ -10,6 +10,7 @@ LocalLink is a Flutter source project for discovering nearby phones and exchangi
 - X25519 key agreement, HKDF-SHA256 key derivation, and AES-256-GCM authenticated message encryption.
 - Local conversation history.
 - Rename this phone from the app.
+- Optional profile photos broadcast only on the local Wi-Fi network.
 
 File transfer, background discovery, and group chat are not implemented yet. Messages are encrypted only when both phones have paired by scanning each other's identity QR. Pairing must be repeated on each phone. The QR contains a public key, never the private key. This security branch has not yet been built or tested on physical phones; review and test it before relying on it for sensitive communication.
 
@@ -56,3 +57,7 @@ flutter run
 ```
 
 The app needs to remain open on both phones. Wi-Fi networks with client isolation enabled may block peer-to-peer traffic. This initial implementation uses IPv4 broadcast and will not discover devices across separate networks or VPNs.
+
+## Security status
+
+This is not a security-audited messenger and must not yet be used for sensitive conversations. The first local contact pins the public key announced by the chosen profile; LocalLink blocks the conversation if that key later changes. The current static X25519 design protects message confidentiality and integrity with AES-GCM, but it does not provide forward secrecy. A later compromise of a device private key can expose previously captured traffic. Physical-device testing, recovery and key-rotation flows, and an independent security review remain required before a production use.

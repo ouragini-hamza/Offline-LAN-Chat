@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
@@ -160,6 +161,65 @@ class ChatController extends ChangeNotifier {
     return updateProfile(name: name, avatarBase64: identity.avatarBase64);
   }
 
+
+
+  Future<ChatMessage> sendFile({
+    required NearbyPeer peer,
+    required String fileName,
+    required Uint8List bytes,
+    required String localPath,
+    void Function(double progress)? onProgress,
+  }) async {
+    if (bytes.isEmpty || bytes.length > 10 * 1024 * 1024) {
+      throw ArgumentError('Choose a file no larger than 10 MB.');
+    }
+    final messageId = _newId();
+    final createdAt = DateTime.now();
+    final attachmentBody = jsonEncode({
+      '_locallink_file': 'v1',
+      'name': fileName,
+      'path': localPath,
+      'size': bytes.length,
+    });
+    final message = ChatMessage(
+      id: messageId,
+      peerId: peer.id,
+      peerName: peer.name,
+      body: attachmentBody,
+      createdAt: createdAt,
+      isOutgoing: true,
+      deliveryStatus: 'sending',
+    );
+    await _database.saveMessage(message);
+    await _refreshRecentConversations();
+    notifyListeners();
+    try {
+      final trusted = await _identityStore.trustedPeer(peer.id);
+      if (trusted == null || trusted.publicKey != peer.publicKey) {
+        throw StateError('Pair with this device by scanning its QR code first.');
+      }
+      await _lan.sendFile(
+        peer: peer,
+        transferId: messageId,
+        fileName: fileName,
+        bytes: bytes,
+        createdAt: createdAt,
+        recipientPublicKey: trusted.publicKey,
+        onProgress: onProgress,
+      );
+      final sent = message.withDeliveryStatus('sent');
+      await _database.updateDeliveryStatus(sent.id, sent.deliveryStatus);
+      await _refreshRecentConversations();
+      notifyListeners();
+      return sent;
+    } on Object {
+      final failed = message.withDeliveryStatus('failed');
+      await _database.updateDeliveryStatus(failed.id, failed.deliveryStatus);
+      await _refreshRecentConversations();
+      notifyListeners();
+      return failed;
+    }
+  }
 
   Future<LocalGroup> createGroup({required String name, required List<String> memberIds}) async {
     final cleanName = name.trim();

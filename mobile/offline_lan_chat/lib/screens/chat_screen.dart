@@ -308,10 +308,7 @@ class _MessageBubble extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text(
-              message.body,
-              style: TextStyle(color: textColor, fontSize: 15, height: 1.35),
-            ),
+            _MessageBody(message: message, textColor: textColor),
             const SizedBox(height: 5),
             Text(
               '${_clockTime(message.createdAt)}${outgoing ? ' · ${_statusLabel(message.deliveryStatus)}' : ''}',
@@ -327,6 +324,59 @@ class _MessageBubble extends StatelessWidget {
       ),
     );
   }
+}
+
+
+class _MessageBody extends StatelessWidget {
+  const _MessageBody({required this.message, required this.textColor});
+  final ChatMessage message;
+  final Color textColor;
+
+  @override
+  Widget build(BuildContext context) {
+    Map<String, dynamic>? attachment;
+    try {
+      final decoded = jsonDecode(message.body);
+      if (decoded is Map<String, dynamic> && decoded['_locallink_file'] == 'v1') {
+        attachment = decoded;
+      }
+    } on Object {
+      // Ordinary text message.
+    }
+    if (attachment == null) {
+      return Text(message.body, style: TextStyle(color: textColor, fontSize: 15, height: 1.35));
+    }
+    final name = attachment['name'] as String? ?? 'File';
+    final path = attachment['path'] as String? ?? '';
+    final size = attachment['size'] as int? ?? 0;
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      const Icon(Icons.attach_file_rounded, size: 22),
+      const SizedBox(width: 8),
+      Flexible(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(name, style: TextStyle(color: textColor, fontWeight: FontWeight.w600)),
+        Text(_formatFileSize(size), style: TextStyle(color: textColor.withValues(alpha: 0.75), fontSize: 11)),
+      ])),
+      if (path.isNotEmpty)
+        IconButton(
+          tooltip: 'Share or save file',
+          onPressed: () async {
+            try {
+              await Share.shareXFiles([XFile(path)], text: 'Shared from LocalLink: $name');
+            } on Object catch (error) {
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not share file: $error')));
+            }
+          },
+          icon: Icon(Icons.ios_share_rounded, color: textColor),
+        ),
+    ]);
+  }
+}
+
+String _formatFileSize(int bytes) {
+  if (bytes < 1024) return '$bytes B';
+  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+  return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 }
 
 class _Composer extends StatelessWidget {

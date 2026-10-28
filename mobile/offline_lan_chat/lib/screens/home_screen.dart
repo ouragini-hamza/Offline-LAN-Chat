@@ -7,7 +7,6 @@ import '../models/chat_message.dart';
 import '../models/nearby_peer.dart';
 import '../services/chat_controller.dart';
 import '../services/identity_store.dart';
-import '../services/group_store.dart';
 import 'group_chat_screen.dart';
 import 'chat_screen.dart';
 

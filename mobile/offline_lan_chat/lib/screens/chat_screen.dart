@@ -33,6 +33,8 @@ class _ChatScreenState extends State<ChatScreen> {
   StreamSubscription<ChatMessage>? _incomingSubscription;
   bool _loading = true;
   bool _sending = false;
+  bool _sendingFile = false;
+  double _fileProgress = 0;
 
   NearbyPeer? get _activePeer {
     for (final peer in widget.controller.peers) {
@@ -108,6 +110,47 @@ class _ChatScreenState extends State<ChatScreen> {
       );
     } finally {
       if (mounted) setState(() => _sending = false);
+    }
+  }
+
+
+  Future<void> _sendFile() async {
+    final peer = _activePeer;
+    if (_sendingFile || _sending || peer == null) return;
+    final selection = await FilePicker.platform.pickFiles(allowMultiple: false, withData: true);
+    if (selection == null || !mounted) return;
+    final file = selection.files.single;
+    final bytes = file.bytes;
+    if (bytes == null || bytes.isEmpty || bytes.length > 10 * 1024 * 1024) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Choose a readable file no larger than 10 MB.'),
+      ));
+      return;
+    }
+    setState(() { _sendingFile = true; _fileProgress = 0; });
+    try {
+      final message = await widget.controller.sendFile(
+        peer: peer,
+        fileName: file.name,
+        bytes: bytes,
+        localPath: file.path ?? '',
+        onProgress: (value) {
+          if (mounted) setState(() => _fileProgress = value);
+        },
+      );
+      if (!mounted) return;
+      setState(() => _messages.add(message));
+      if (message.deliveryStatus == 'failed') {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('File transfer failed. Check the Wi-Fi connection.'),
+        ));
+      }
+      _scrollToLatest();
+    } on Object catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not send file: $error')));
+    } finally {
+      if (mounted) setState(() { _sendingFile = false; _fileProgress = 0; });
     }
   }
 

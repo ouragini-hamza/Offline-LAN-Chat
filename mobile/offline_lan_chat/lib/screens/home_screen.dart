@@ -7,6 +7,8 @@ import '../models/chat_message.dart';
 import '../models/nearby_peer.dart';
 import '../services/chat_controller.dart';
 import '../services/identity_store.dart';
+import '../services/group_store.dart';
+import 'group_chat_screen.dart';
 import 'chat_screen.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -68,6 +70,44 @@ class HomeScreen extends StatelessWidget {
                         ),
                       ),
                     const SizedBox(height: 28),
+                    const SizedBox(height: 28),
+                    Row(children: [
+                      const Expanded(child: _SectionHeading(
+                        title: 'Groups',
+                        caption: 'Local groups on this Wi-Fi',
+                      )),
+                      IconButton(
+                        tooltip: 'Create group',
+                        onPressed: () => _createGroup(context),
+                        icon: const Icon(Icons.group_add_outlined),
+                      ),
+                    ]),
+                    const SizedBox(height: 8),
+                    if (controller.groups.isEmpty)
+                      const _EmptyCard(
+                        icon: Icons.groups_outlined,
+                        title: 'No groups yet',
+                        message: 'Create a group and choose people nearby.',
+                      )
+                    else
+                      ...controller.groups.map((group) => Card(
+                        color: Colors.white,
+                        elevation: 0,
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          leading: const CircleAvatar(
+                            backgroundColor: Color(0xFFE7F2EC),
+                            child: Icon(Icons.groups_rounded, color: Color(0xFF28674F)),
+                          ),
+                          title: Text(group.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                          subtitle: Text('${group.memberIds.length} members · local Wi-Fi'),
+                          trailing: const Icon(Icons.chevron_right_rounded),
+                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                            builder: (_) => GroupChatScreen(controller: controller, group: group),
+                          )),
+                        ),
+                      )),
+                    const SizedBox(height: 28),
                     const _SectionHeading(
                       title: 'Recent chats',
                       caption: 'Your history stays on this phone',
@@ -98,6 +138,66 @@ class HomeScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _createGroup(BuildContext context) async {
+    final nameController = TextEditingController();
+    final selected = <String>{};
+    final draft = await showDialog<_GroupDraft>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Create a group'),
+          content: SizedBox(
+            width: 360,
+            child: SingleChildScrollView(child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  maxLength: 48,
+                  decoration: const InputDecoration(labelText: 'Group name'),
+                ),
+                const SizedBox(height: 8),
+                if (controller.peers.isEmpty)
+                  const Text('No nearby phones yet. Connect to the same Wi-Fi first.')
+                else
+                  ...controller.peers.map((peer) => CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: selected.contains(peer.id),
+                    title: Text(peer.name),
+                    subtitle: Text(peer.id.substring(0, peer.id.length > 8 ? 8 : peer.id.length)),
+                    onChanged: (value) => setDialogState(() {
+                      if (value == true) { selected.add(peer.id); } else { selected.remove(peer.id); }
+                    }),
+                  )),
+              ],
+            )),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, _GroupDraft(
+                name: nameController.text, memberIds: selected.toList(),
+              )),
+              child: const Text('Create'),
+            ),
+          ],
+        ),
+      ),
+    );
+    nameController.dispose();
+    if (draft == null || !context.mounted) return;
+    try {
+      await controller.createGroup(name: draft.name, memberIds: draft.memberIds);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Group created. Members must be online to receive messages.'),
+      ));
+    } on Object catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not create group: $error')));
+    }
   }
 
   NearbyPeer? _peerById(String id) {
@@ -154,6 +254,12 @@ class HomeScreen extends StatelessWidget {
       );
     }
   }
+}
+
+class _GroupDraft {
+  const _GroupDraft({required this.name, required this.memberIds});
+  final String name;
+  final List<String> memberIds;
 }
 
 class _ProfileDraft {

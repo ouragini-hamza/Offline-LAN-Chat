@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import '../models/nearby_peer.dart';
 import 'identity_store.dart';
 import 'message_crypto.dart';
+import 'package:path_provider/path_provider.dart';
 
 class IncomingText {
   const IncomingText({
@@ -25,10 +27,13 @@ class IncomingText {
 class LanDiscoveryService {
   static const _discoveryPort = 45454;
   static const _maxAvatarCharacters = 12 * 1024;
+  static const _maxFileBytes = 10 * 1024 * 1024;
+  static const _fileChunkBytes = 4096;
   static const _announceInterval = Duration(seconds: 3);
   static const _peerExpiry = Duration(seconds: 12);
 
   final Map<String, NearbyPeer> _peers = {};
+  final Map<String, _IncomingFileBuffer> _incomingFiles = {};
   final StreamController<List<NearbyPeer>> _peersController =
       StreamController<List<NearbyPeer>>.broadcast();
   DeviceIdentity? _identity;
@@ -151,6 +156,106 @@ class LanDiscoveryService {
     }
   }
 
+
+  Future<void> sendFile({
+    required NearbyPeer peer,
+    required String transferId,
+    required String fileName,
+    required Uint8List bytes,
+    required DateTime createdAt,
+    required String recipientPublicKey,
+    void Function(double progress)? onProgress,
+  }) async {
+    final identity = _identity;
+    if (identity == null) throw StateError('Discovery is not running.');
+    if (bytes.isEmpty || bytes.length > _maxFileBytes) {
+      throw ArgumentError('Files must be between 1 byte and 10 MB.');
+    }
+    final trusted = await _identityStore.trustedPeer(peer.id);
+    if (trusted == null || trusted.publicKey != recipientPublicKey) {
+      throw StateError('Pair with this device by scanning its QR code first.');
+    }
+    final socket = await Socket.connect(
+      InternetAddress(peer.address), peer.port,
+      timeout: const Duration(seconds: 5),
+    );
+    socket.setOption(SocketOption.tcpNoDelay, true);
+    final acknowledgement = Completer<void>();
+    final subscription = socket
+        .cast<List<int>>()
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .listen((line) {
+      try {
+        final packet = jsonDecode(line) as Map<String, dynamic>;
+        if (packet['kind'] == 'file_ack' && packet['transfer_id'] == transferId &&
+            !acknowledgement.isCompleted) {
+          acknowledgement.complete();
+        }
+      } on Object {
+        // Ignore unrelated or malformed acknowledgements.
+      }
+    }, onError: (Object error) {
+      if (!acknowledgement.isCompleted) acknowledgement.completeError(error);
+    }, onDone: () {
+      if (!acknowledgement.isCompleted) {
+        acknowledgement.completeError(const SocketException('Peer closed before file acknowledgement.'));
+      }
+    });
+
+    try {
+      final total = (bytes.length / _fileChunkBytes).ceil();
+      final timestamp = createdAt.microsecondsSinceEpoch;
+      for (var index = 0; index < total; index++) {
+        final start = index * _fileChunkBytes;
+        final end = (start + _fileChunkBytes < bytes.length)
+            ? start + _fileChunkBytes
+            : bytes.length;
+        final payload = jsonEncode({
+          'name': fileName,
+          'size': bytes.length,
+          'total': total,
+          'index': index,
+          'data': base64Encode(bytes.sublist(start, end)),
+        });
+        final encrypted = await _crypto.encrypt(
+          local: identity,
+          recipientPublicKey: trusted.publicKey,
+          messageId: '$transferId:$index',
+          plaintext: payload,
+          createdAt: timestamp,
+          identityStore: _identityStore,
+        );
+        socket.write('${jsonEncode({
+          'kind': 'file_chunk',
+          'transfer_id': transferId,
+          'index': index,
+          'from_id': identity.id,
+          'to_id': peer.id,
+          'sender_public_key': identity.publicKey,
+          'nonce': encrypted['nonce'],
+          'ciphertext': encrypted['ciphertext'],
+          'mac': encrypted['mac'],
+          'created_at': timestamp,
+        })}\n');
+        await socket.flush();
+        onProgress?.call((index + 1) / total);
+      }
+      socket.write('${jsonEncode({
+        'kind': 'file_done',
+        'transfer_id': transferId,
+        'from_id': identity.id,
+        'to_id': peer.id,
+        'sender_public_key': identity.publicKey,
+      })}\n');
+      await socket.flush();
+      await acknowledgement.future.timeout(const Duration(minutes: 2));
+    } finally {
+      await subscription.cancel();
+      socket.destroy();
+    }
+  }
+
   void _handleDatagram(RawSocketEvent event) {
     if (event != RawSocketEvent.read) return;
     final socket = _discoverySocket;
@@ -197,12 +302,15 @@ class LanDiscoveryService {
 
   void _handleConnection(Socket socket) {
     socket.setOption(SocketOption.tcpNoDelay, true);
+    var pending = Future<void>.value();
     socket
         .cast<List<int>>()
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen(
-          (line) => unawaited(_handleMessageLine(socket, line)),
+          (line) {
+            pending = pending.then((_) => _handleMessageLine(socket, line));
+          },
           onError: (_) => socket.destroy(),
           onDone: socket.destroy,
           cancelOnError: true,
@@ -213,6 +321,10 @@ class LanDiscoveryService {
     try {
       if (line.length > 16 * 1024) return;
       final packet = jsonDecode(line) as Map<String, dynamic>;
+      if (packet['kind'] == 'file_chunk' || packet['kind'] == 'file_done') {
+        await _handleFilePacket(socket, packet);
+        return;
+      }
       final identity = _identity;
       if (identity == null ||
           packet['kind'] != 'text' ||
@@ -297,6 +409,107 @@ class LanDiscoveryService {
     _peersController.add(peers);
   }
 
+
+  Future<void> _handleFilePacket(Socket socket, Map<String, dynamic> packet) async {
+    final identity = _identity;
+    final senderId = packet['from_id'];
+    final transferId = packet['transfer_id'];
+    final publicKey = packet['sender_public_key'];
+    if (identity == null || senderId is! String || transferId is! String ||
+        transferId.isEmpty || transferId.length > 128 || publicKey is! String ||
+        packet['to_id'] != identity.id) return;
+    final trusted = await _identityStore.trustedPeer(senderId);
+    if (trusted == null || trusted.publicKey != publicKey) return;
+
+    if (packet['kind'] == 'file_chunk') {
+      if (packet['index'] is! int || packet['created_at'] is! int ||
+          packet['nonce'] is! String || packet['ciphertext'] is! String ||
+          packet['mac'] is! String) return;
+      final index = packet['index'] as int;
+      final createdAt = packet['created_at'] as int;
+      final plain = await _crypto.decrypt(
+        local: identity,
+        senderPublicKey: publicKey,
+        senderId: senderId,
+        messageId: '$transferId:$index',
+        nonce: packet['nonce'] as String,
+        ciphertext: packet['ciphertext'] as String,
+        mac: packet['mac'] as String,
+        createdAt: createdAt,
+        identityStore: _identityStore,
+      );
+      final payload = jsonDecode(plain) as Map<String, dynamic>;
+      final name = payload['name'];
+      final size = payload['size'];
+      final total = payload['total'];
+      final payloadIndex = payload['index'];
+      final data = payload['data'];
+      if (name is! String || name.isEmpty || name.length > 255 ||
+          size is! int || size < 1 || size > _maxFileBytes ||
+          total is! int || total < 1 || total > 3000 ||
+          index < 0 || index >= total || payloadIndex != index ||
+          data is! String) return;
+      final chunk = base64Decode(data);
+      if (chunk.isEmpty || chunk.length > _fileChunkBytes) return;
+      final buffer = _incomingFiles.putIfAbsent(transferId, () => _IncomingFileBuffer(
+        senderId: senderId,
+        fileName: name,
+        fileSize: size,
+        totalChunks: total,
+        createdAt: DateTime.fromMicrosecondsSinceEpoch(createdAt),
+      ));
+      if (buffer.senderId != senderId || buffer.fileName != name ||
+          buffer.fileSize != size || buffer.totalChunks != total) {
+        _incomingFiles.remove(transferId);
+        return;
+      }
+      buffer.chunks.putIfAbsent(index, () => chunk);
+      return;
+    }
+
+    final buffer = _incomingFiles.remove(transferId);
+    if (buffer == null || buffer.senderId != senderId ||
+        buffer.chunks.length != buffer.totalChunks) return;
+    final builder = BytesBuilder(copy: false);
+    for (var i = 0; i < buffer.totalChunks; i++) {
+      final chunk = buffer.chunks[i];
+      if (chunk == null) return;
+      builder.add(chunk);
+    }
+    final bytes = builder.takeBytes();
+    if (bytes.length != buffer.fileSize) return;
+    final documents = await getApplicationDocumentsDirectory();
+    final directory = Directory('${documents.path}/received_files');
+    await directory.create(recursive: true);
+    final safeName = buffer.fileName
+        .replaceAll(RegExp(r'[/\\\\]'), '_')
+        .replaceAll('..', '_');
+    var target = File('${directory.path}/$safeName');
+    if (await target.exists()) {
+      final stamp = DateTime.now().millisecondsSinceEpoch;
+      final dot = safeName.lastIndexOf('.');
+      final base = dot > 0 ? safeName.substring(0, dot) : safeName;
+      final extension = dot > 0 ? safeName.substring(dot) : '';
+      target = File('${directory.path}/${base}_$stamp$extension');
+    }
+    await target.writeAsBytes(bytes, flush: true);
+    final fileMessage = IncomingText(
+      id: transferId,
+      peerId: senderId,
+      peerName: trusted.name,
+      body: jsonEncode({
+        '_locallink_file': 'v1',
+        'name': target.uri.pathSegments.last,
+        'path': target.path,
+        'size': bytes.length,
+      }),
+      createdAt: buffer.createdAt,
+    );
+    await _onIncomingText?.call(fileMessage);
+    socket.write('${jsonEncode({'kind': 'file_ack', 'transfer_id': transferId})}\n');
+    await socket.flush();
+  }
+
   Future<void> stop() async {
     _announceTimer?.cancel();
     _announceTimer = null;
@@ -307,6 +520,7 @@ class LanDiscoveryService {
     await _server?.close();
     _server = null;
     _peers.clear();
+    _incomingFiles.clear();
     _emitPeers();
   }
 
@@ -314,4 +528,20 @@ class LanDiscoveryService {
     await stop();
     await _peersController.close();
   }
+}
+
+class _IncomingFileBuffer {
+  _IncomingFileBuffer({
+    required this.senderId,
+    required this.fileName,
+    required this.fileSize,
+    required this.totalChunks,
+    required this.createdAt,
+  });
+  final String senderId;
+  final String fileName;
+  final int fileSize;
+  final int totalChunks;
+  final DateTime createdAt;
+  final Map<int, List<int>> chunks = {};
 }

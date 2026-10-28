@@ -118,7 +118,7 @@ class HomeScreen extends StatelessWidget {
     } on StateError catch (error) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error.message?.toString() ?? 'Profile changed.')),
+          SnackBar(content: Text(error.message.toString())),
         );
       }
       return;
@@ -150,7 +150,7 @@ class HomeScreen extends StatelessWidget {
     } on ArgumentError catch (error) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.message?.toString() ?? 'Invalid name.')),
+        SnackBar(content: Text(error.message.toString())),
       );
     }
   }

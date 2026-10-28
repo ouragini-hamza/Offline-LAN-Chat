@@ -469,7 +469,7 @@ class _DeviceAvatar extends StatelessWidget {
               child: Image.memory(
                 base64Decode(avatarBase64!),
                 fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => Icon(
+                errorBuilder: (context, error, stackTrace) => Icon(
                   Icons.person_outline_rounded,
                   color: const Color(0xFF28674F),
                   size: size / 2,

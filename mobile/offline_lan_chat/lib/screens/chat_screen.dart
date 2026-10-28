@@ -357,6 +357,11 @@ class _Composer extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
+          IconButton(
+            tooltip: 'Attach file (max 10 MB)',
+            onPressed: enabled ? onAttach : null,
+            icon: const Icon(Icons.attach_file_rounded),
+          ),
           Expanded(
             child: TextField(
               controller: controller,
@@ -377,6 +382,8 @@ class _Composer extends StatelessWidget {
               ),
             ),
           ),
+          if (sending && fileProgress > 0)
+            SizedBox(width: 32, child: LinearProgressIndicator(value: fileProgress)),
           const SizedBox(width: 9),
           Padding(
             padding: const EdgeInsets.only(bottom: 2),

@@ -341,8 +341,24 @@ class LanDiscoveryService {
       }
 
       final senderId = packet['from_id'] as String;
-      final trusted = await _identityStore.trustedPeer(senderId);
       final senderPublicKey = packet['sender_public_key'] as String;
+      var trusted = await _identityStore.trustedPeer(senderId);
+
+      // QR pairing is optional for nearby LAN chat. Accept a first contact
+      // only when its ID and public key match a peer announcement we heard
+      // directly on this same local network (TOFU).
+      if (trusted == null) {
+        final discovered = _peers[senderId];
+        if (discovered == null || discovered.publicKey != senderPublicKey) {
+          return;
+        }
+        await _identityStore.trustPeer(
+          id: discovered.id,
+          name: discovered.name,
+          publicKey: discovered.publicKey,
+        );
+        trusted = await _identityStore.trustedPeer(senderId);
+      }
       if (trusted == null || trusted.publicKey != senderPublicKey) return;
       final messageId = packet['id'] as String;
       final createdAt = packet['created_at'] as int;
